@@ -64,6 +64,7 @@ pub const Config = struct {
     game_ids: []const []const u8,
     state_file: []const u8,
     port: u16,
+    webhook_username: ?[]const u8,
 };
 
 pub const ConfigError = error{
@@ -175,6 +176,24 @@ fn webhookError() ConfigError {
     return ConfigError.InvalidWebhookUrl;
 }
 
+/// Optional webhook display name (Discord caps usernames at 80 chars). Blank or
+/// missing yields null, which omits the field so the webhook's own name is used.
+/// Set WEBHOOK_USERNAME to tell this worker's messages apart from any other bot
+/// posting to the same channel.
+fn optionalName(alloc: std.mem.Allocator, raw: ?[]const u8) !?[]u8 {
+    const v = raw orelse return null;
+    const trimmed = std.mem.trim(u8, v, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    for (trimmed) |c| {
+        if (c < ' ') return ConfigError.InvalidControlCharacters;
+    }
+    const max = 80;
+    if (trimmed.len <= max) return try alloc.dupe(u8, trimmed);
+    var end: usize = max;
+    while (end > 0 and (trimmed[end] & 0xC0) == 0x80) end -= 1;
+    return try alloc.dupe(u8, trimmed[0..end]);
+}
+
 fn parseEvents(raw: ?[]const u8) !Events {
     const s = raw orelse "new,verified,rejected";
     const source = if (std.mem.trim(u8, s, " \t\r\n").len == 0) "new,verified,rejected" else s;
@@ -264,6 +283,7 @@ pub fn load(alloc: std.mem.Allocator) !Config {
         .game_ids = try parseGameIds(alloc, getEnv(&env, "MONITORED_GAME_IDS")),
         .state_file = state_file,
         .port = @intCast(port),
+        .webhook_username = try optionalName(alloc, getEnv(&env, "WEBHOOK_USERNAME")),
     };
 }
 

@@ -12,16 +12,19 @@ pub const panic = std.debug.no_panic;
 var g_shutdown: ?*std.atomic.Value(bool) = null;
 
 pub fn main() !void {
-    var debug_alloc = std.heap.DebugAllocator(.{}){};
+    // A single-threaded slab allocator. It packs many small allocations into
+    // shared backing pages instead of giving each one a whole 4 KiB OS page,
+    // which is what the page_allocator did — the HTTP client, TLS, the seen-run
+    // caches and the state store make thousands of tiny allocations, so that
+    // rounding is what pinned RSS at ~4 MB. Safety/leak-tracking only in Debug.
+    var gpa_state = std.heap.DebugAllocator(.{
+        .thread_safe = false,
+        .safety = builtin.mode == .Debug,
+    }){};
     defer if (builtin.mode == .Debug) {
-        _ = debug_alloc.deinit();
+        _ = gpa_state.deinit();
     };
-    const gpa = if (builtin.mode == .Debug)
-        debug_alloc.allocator()
-    else if (builtin.single_threaded)
-        std.heap.page_allocator
-    else
-        std.heap.smp_allocator;
+    const gpa = gpa_state.allocator();
 
     var threaded: std.Io.Threaded = .init(gpa, .{});
     defer threaded.deinit();
@@ -41,7 +44,7 @@ pub fn main() !void {
     var src = speedrun.Client.init(gpa, &client, config.speedrun_api_key, &shutdown);
     defer src.deinit();
 
-    var dsc = discord.Discord.init(&client, config.discord_webhook_url, &shutdown);
+    var dsc = discord.Discord.init(&client, config.discord_webhook_url, config.webhook_username, &shutdown);
 
     var store = try state.StateStore.init(gpa, io, config.state_file);
     defer store.deinit();

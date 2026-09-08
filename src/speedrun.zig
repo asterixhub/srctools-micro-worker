@@ -8,7 +8,10 @@ const Value = std.json.Value;
 const RunSummary = types.RunSummary;
 
 const API_BASE = "https://www.speedrun.com/api/v1";
-const RUN_EMBEDS = "game,category,level,players,platform,region";
+// Only the fields the embed actually reads: game (name/id), category (name),
+// level (map name), players (runner). Platform/region are never used, so we do
+// not embed them — smaller responses mean a smaller per-cycle parse.
+const RUN_EMBEDS = "game,category,level,players";
 const MAX_ATTEMPTS = 4;
 const MIN_REQUEST_GAP_MS = 650;
 const VARIABLES_CACHE_MS = 12 * 60 * 60 * 1000;
@@ -138,7 +141,9 @@ pub const Client = struct {
     }
 
     pub fn moderatedGames(self: *Client, arena: std.mem.Allocator, user_id: []const u8) Error![]Game {
-        const path = try std.fmt.allocPrint(arena, "/games?moderator={s}&embed=platforms,regions", .{user_id});
+        // We only read each game's id and international name (both in the base
+        // resource), so no platforms/regions embed is requested.
+        const path = try std.fmt.allocPrint(arena, "/games?moderator={s}", .{user_id});
         const items = try self.collection(arena, path, 500);
         var games: std.ArrayList(Game) = .empty;
         for (items) |item| {

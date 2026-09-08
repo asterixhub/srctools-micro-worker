@@ -17,20 +17,22 @@ pub const SendError = DeliveryError || util.Aborted;
 pub const Discord = struct {
     http: *http.Http,
     url: []const u8,
+    username: ?[]const u8,
     shutdown: *std.atomic.Value(bool),
     prng: std.Random.DefaultPrng,
 
-    pub fn init(client: *http.Http, url: []const u8, shutdown: *std.atomic.Value(bool)) Discord {
+    pub fn init(client: *http.Http, url: []const u8, username: ?[]const u8, shutdown: *std.atomic.Value(bool)) Discord {
         return .{
             .http = client,
             .url = url,
+            .username = username,
             .shutdown = shutdown,
             .prng = std.Random.DefaultPrng.init(@bitCast(util.nowMs() ^ 0x51ed)),
         };
     }
 
     pub fn send(self: *Discord, arena: std.mem.Allocator, kind: FeedKind, run: RunSummary) SendError!void {
-        const payload = try buildPayload(arena, kind, run);
+        const payload = try buildPayload(arena, kind, run, self.username);
 
         var attempt: u32 = 1;
         while (attempt <= MAX_ATTEMPTS) : (attempt += 1) {
@@ -88,7 +90,7 @@ fn safe(arena: std.mem.Allocator, value: []const u8, max: usize) ![]u8 {
 
 /// Build the full webhook JSON payload. Returns error.PermanentFailure for a
 /// run with no usable URL, matching buildEmbed's throw in discord.ts.
-pub fn buildPayload(arena: std.mem.Allocator, kind: FeedKind, run: RunSummary) SendError![]u8 {
+pub fn buildPayload(arena: std.mem.Allocator, kind: FeedKind, run: RunSummary, username: ?[]const u8) SendError![]u8 {
     const run_url = run.run_url orelse return error.PermanentFailure;
 
     const map_src = run.map_name orelse run.category_name orelse "Unknown map";
@@ -132,13 +134,17 @@ pub fn buildPayload(arena: std.mem.Allocator, kind: FeedKind, run: RunSummary) S
         color: u32,
     };
     const Payload = struct {
+        username: ?[]const u8,
         embeds: []const Embed,
         allowed_mentions: struct { parse: []const []const u8 },
     };
     const payload = Payload{
+        .username = username,
         .embeds = &.{.{ .title = title, .url = run_url, .description = description, .color = color }},
         .allowed_mentions = .{ .parse = &.{} },
     };
 
-    return std.json.Stringify.valueAlloc(arena, payload, .{}) catch error.TransientFailure;
+    // emit_null_optional_fields = false drops `username` when it is null, so an
+    // unset WEBHOOK_USERNAME reproduces the exact prior payload.
+    return std.json.Stringify.valueAlloc(arena, payload, .{ .emit_null_optional_fields = false }) catch error.TransientFailure;
 }
