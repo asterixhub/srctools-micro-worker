@@ -1,0 +1,12 @@
+# Zig build outputs
+zig-out/
+.zig-cache/
+
+# Local runtime state (JSON dedup/outbox store)
+data/
+
+# Secrets — never commit real values; use .env.example as the template.
+.env
+
+# Windows debug symbols from native builds
+*.pdb
